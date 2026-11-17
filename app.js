@@ -1,7 +1,7 @@
 // KU Housing Fit. Helpers (api, el, show, money, ...) live in common.js; sample data in seed.js.
 const DEFAULT_PREFS = {
     year: 'freshman', roommates: 'any', kitchen: 'nice', food: 'mix', area: 'any',
-    bath: 'some', furnished: 'must', priority: 'balance', budget: 12000, scholarships: 0
+    bath: 'some', furnished: 'must', car: 'no', commute: 'mid', priority: 'balance', budget: 12000, scholarships: 0
 };
 
 const state = {
@@ -33,7 +33,11 @@ const QUESTIONS = [
     { key: 'kitchen', title: 'Do you want a kitchen?', icon: 'cooking-pot', opts: [
         ['must', 'Must have', 'cooking-pot'], ['nice', 'Nice to have', 'smile'], ['no', 'Not needed', 'x']] },
     { key: 'area', title: 'Where on campus?', icon: 'map-pin', opts: [
-        ['daisy', 'Daisy Hill', 'map-pin'], ['central', 'Central campus', 'building-2'], ['any', 'No preference', 'check']] },
+        ['daisy', 'Daisy Hill', 'map-pin'], ['central', 'Central campus', 'building-2'], ['off', 'Off campus', 'house'], ['any', 'No preference', 'check']] },
+    { key: 'commute', title: 'How long a trip to class is OK?', icon: 'clock', opts: [
+        ['close', 'Up to 10 min', 'clock'], ['mid', 'Up to 20 min', 'bus'], ['any', "Doesn't matter", 'check']] },
+    { key: 'car', title: 'Will you have a car at KU?', icon: 'car', opts: [
+        ['yes', 'Yes', 'car'], ['no', 'No', 'bus']] },
     { key: 'bath', title: 'Fewer people per bathroom?', icon: 'bath', opts: [
         ['high', 'Matters a lot', 'bath'], ['some', 'Somewhat', 'meh'], ['low', "Don't mind", 'smile']] },
     { key: 'furnished', title: 'Furniture?', icon: 'sofa', opts: [
@@ -71,7 +75,13 @@ function normHousing(r) {
         pros: list(r['Pros']),
         cons: list(r['Cons']),
         details: str(r['Details']),
-        link: safeLink(r['Link'])
+        link: safeLink(r['Link']),
+        commuteMin: num(r['Commute Minutes']), // 0 = unknown
+        noCarMin: num(r['Minutes Without Car']), // 0 = same as commuteMin
+        commute: str(r['Commute']),
+        car: /^y/i.test(str(r['Car Needed'])) ? 'yes' : /^h/i.test(str(r['Car Needed'])) ? 'helpful' : 'no',
+        lease: str(r['Lease']),
+        offCampus: /off/i.test(str(r['Area']))
     };
 }
 
@@ -89,8 +99,25 @@ function normDining(r) {
     };
 }
 
+// Details residents can confirm or fix, and the sheet column each one lives in
+const CHECK_COLS = {
+    price: 'Price Per Year', mealRequired: 'Meal Plan Required', kitchen: 'Kitchen', furnished: 'Furnished',
+    laundry: 'Laundry', perBath: 'People Per Bath', commuteMin: 'Commute Minutes', car: 'Car Needed', lease: 'Lease'
+};
+
 function applyData(d) {
-    state.housing = (d.housing || []).map(normHousing).filter((h) => h.key);
+    state.residentInfo = d.residentInfo || {};
+    state.residentWeight = Number(d.residentWeight) || 2;
+    // Residents' corrections win over the listed value once enough of them agree (decided by the backend)
+    const rows = (d.housing || []).map((r) => {
+        const info = state.residentInfo[str(r['Key'])] || {};
+        const out = { ...r };
+        Object.keys(info).forEach((f) => {
+            if (info[f].applied && CHECK_COLS[f]) out[CHECK_COLS[f]] = info[f].applied;
+        });
+        return out;
+    });
+    state.housing = rows.map(normHousing).filter((h) => h.key);
     state.dining = (d.dining || []).map(normDining).filter((p) => p.key);
     state.costs = (d.costs || []).map((c) => ({ item: str(c['Item']), amount: num(c['Per Year']), notes: str(c['Notes']) })).filter((c) => c.item);
     state.reviews = d.reviews || [];
@@ -104,15 +131,20 @@ const RATINGS = [
 
 function statsFor(key) {
     const rs = state.reviews.filter((r) => r.key === key);
+    // Resident check-ins count more: they come from people who live there now
+    const w = (r) => (r.resident ? state.residentWeight || 2 : 1);
     const avg = (f) => {
-        const v = rs.map((r) => Number(r[f])).filter((n) => n >= 1);
-        return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+        const v = rs.filter((r) => Number(r[f]) >= 1);
+        const total = v.reduce((a, r) => a + w(r), 0);
+        return total ? v.reduce((a, r) => a + w(r) * Number(r[f]), 0) / total : 0;
     };
     const rec = rs.filter((r) => r.recommend);
+    const recW = rec.reduce((a, r) => a + w(r), 0);
     return {
         n: rs.length,
+        residents: rs.filter((r) => r.resident).length,
         avg: Object.fromEntries(RATINGS.map(([f]) => [f, avg(f)])),
-        recommendPct: rec.length ? Math.round((100 * rec.filter((r) => r.recommend === 'Yes').length) / rec.length) : null
+        recommendPct: recW ? Math.round((100 * rec.filter((r) => r.recommend === 'Yes').reduce((a, r) => a + w(r), 0)) / recW) : null
     };
 }
 
@@ -143,6 +175,9 @@ function planFor(h) {
 }
 
 const yearlyFood = (plan) => (plan ? plan.price * 2 : 0);
+
+// Minutes to class for this student: the no-car trip (bus or walk) when they won't have a car
+const tripMin = (h) => (state.prefs.car === 'no' && h.noCarMin ? h.noCarMin : h.commuteMin);
 
 // ---------- Scoring ----------
 function score(h) {
@@ -186,16 +221,35 @@ function score(h) {
     }
 
     if (p.area !== 'any') {
-        const want = p.area === 'daisy' ? /daisy/i : /central/i;
-        const ok = want.test(h.area);
+        const ok = p.area === 'off' ? h.offCampus : (p.area === 'daisy' ? /daisy/i : /central/i).test(h.area);
         fit(0.8, ok ? 1 : 0.3);
-        why(ok, ok ? `On ${h.area}` : `In ${h.area}`);
+        why(ok, ok ? `${h.offCampus ? '' : 'On '}${h.area}` : `${h.offCampus ? '' : 'In '}${h.area}`);
+    }
+
+    // Commute: full marks within the limit, sliding down 20 minutes past it; unknown counts as so-so
+    if (p.commute !== 'any') {
+        const limit = p.commute === 'close' ? 10 : 20;
+        const m = tripMin(h);
+        const v = !m ? 0.7 : m <= limit ? 1 : Math.max(0.1, 1 - (m - limit) / 20);
+        fit(1, v);
+        if (m) why(m <= limit, `About ${m} min to class${h.noCarMin && state.prefs.car === 'no' ? ' without a car' : ''}`);
+    }
+
+    // Car: off-campus places may need one
+    if (h.car === 'yes') {
+        fit(p.car === 'yes' ? 0.5 : 1.5, p.car === 'yes' ? 1 : 0);
+        why(p.car === 'yes', p.car === 'yes' ? 'You can drive to class' : 'You would need a car');
+    } else if (h.car === 'helpful') {
+        fit(1, p.car === 'yes' ? 1 : 0.5);
+        why(p.car === 'yes', p.car === 'yes' ? 'Your car makes this easy' : 'A car helps here; otherwise the bus');
+    } else if (p.car === 'yes' && !h.offCampus) {
+        why(false, 'Campus parking permit needed for your car');
     }
 
     if (p.bath !== 'low') {
         const v = h.perBath <= 2 ? 1 : p.bath === 'high' ? 0.25 : 0.65;
         fit(p.bath === 'high' ? 1.2 : 0.6, v);
-        if (h.perBath) why(h.perBath <= 2, `${h.perBath} people per bathroom`);
+        if (h.perBath) why(h.perBath <= 2, h.perBath === 1 ? 'Private bathroom' : `${h.perBath} people per bathroom`);
     }
 
     if (p.furnished === 'must') {
@@ -251,7 +305,11 @@ function ratingLine(st) {
         line.append(icon('message-square'), el('span', 'muted', 'No student reviews yet'));
         return line;
     }
-    line.append(stars(st.avg.overall), el('strong', '', st.avg.overall.toFixed(1)), el('span', 'muted', `· ${plural(st.n, 'review')}`));
+    if (!st.avg.overall) {
+        line.append(icon('message-square'), el('span', 'muted', plural(st.n, 'review')));
+        return line;
+    }
+    line.append(stars(st.avg.overall), el('strong', '', st.avg.overall.toFixed(1)), el('span', 'muted', `· ${plural(st.n, 'review')}${st.residents ? `, ${st.residents} from residents` : ''}`));
     if (st.recommendPct !== null) line.appendChild(el('span', 'muted', `· ${st.recommendPct}% recommend`));
     return line;
 }
@@ -275,14 +333,38 @@ function facts(h) {
     };
     add('map-pin', h.area || '–');
     add('users', h.style || `${h.unit} people`);
-    if (h.perBath) add('bath', `${h.perBath} per bathroom`);
+    if (h.perBath) add('bath', h.perBath === 1 ? 'Private bathroom' : `${h.perBath} per bathroom`);
     add('cooking-pot', h.kitchen === 'in unit' ? 'Own kitchen' : h.kitchen === 'shared' ? 'Shared kitchen' : 'No kitchen');
     add('sofa', h.furnished ? 'Furnished' : 'Not furnished');
     if (h.laundry) add('washing-machine', `Laundry: ${h.laundry}`);
     add('utensils', h.mealRequired ? 'Meal plan required' : 'Meal plan optional');
     if (h.dining) add('building-2', `Dining: ${h.dining}`);
+    if (h.commute || h.commuteMin) add('clock', h.commute || `About ${h.commuteMin} min to class`);
+    add('car', h.car === 'yes' ? 'Car needed' : h.car === 'helpful' ? 'Car helpful' : 'No car needed');
+    if (h.lease) add('calendar', `Lease: ${h.lease}`);
     add('graduation-cap', h.who);
     return grid;
+}
+
+// The deciding basics at a glance: kitchen, meal plan, getting to class, lease
+function quickFacts(h) {
+    const row = el('div', 'quick');
+    const add = (ic, text) => {
+        const q = el('span', 'quick-fact');
+        q.append(icon(ic), el('span', '', text));
+        row.appendChild(q);
+    };
+    add('cooking-pot', h.kitchen === 'in unit' ? 'Own kitchen' : h.kitchen === 'shared' ? 'Shared kitchen' : 'No kitchen');
+    add('utensils', h.mealRequired ? 'Meal plan required' : 'Meal plan optional');
+    add(h.car === 'no' ? 'map-pin' : 'car', h.car === 'yes' ? 'Car needed' : h.car === 'helpful' ? 'Car helpful' : 'Walk to class');
+    if (h.lease && !/academic/i.test(h.lease)) add('calendar', h.lease);
+    const price = (state.residentInfo[h.key] || {}).price;
+    if (price) {
+        const n = (price.votes.find((v) => Number(v.value) === h.price) || {}).n || 0;
+        if (price.applied) add('circle-check', 'Price updated by residents');
+        else if (n) add('circle-check', `Price confirmed by ${plural(n, 'resident')}`);
+    }
+    return row;
 }
 
 function prosCons(h) {
@@ -372,7 +454,7 @@ function matchCard(r, i) {
     const head = el('summary', 'vcard-head');
     head.appendChild(el('span', 'rank', String(i + 1)));
     const info = el('span', 'info');
-    info.append(el('span', 'name', h.name), el('span', 'sub', `${money(total)}/yr with food · ${h.area}`));
+    info.append(el('span', 'name', h.name), el('span', 'sub', [`${money(total)}/yr with food`, tripMin(h) ? `${tripMin(h)} min to class` : h.area].join(' · ')));
     const pctEl = el('span', `pct ${pct >= 75 ? 'hi' : pct >= 55 ? 'mid' : 'lo'}`);
     pctEl.append(el('strong', '', `${pct}%`), el('small', '', 'match'));
     const chev = el('span', 'chev');
@@ -386,7 +468,7 @@ function matchCard(r, i) {
         c.append(icon(good ? 'check' : 'triangle-alert'), el('span', '', text));
         why.appendChild(c);
     });
-    body.append(why, ratingLine(stats));
+    body.append(quickFacts(h), why, ratingLine(stats));
 
     // Cost breakdown with a meal plan picker
     const cost = el('div', 'costbox');
@@ -467,7 +549,10 @@ function renderCompare() {
         const ab = availabilityBadge(h);
         if (ab) tags.appendChild(ab);
         if (tags.children.length) body.appendChild(tags);
-        body.append(ratingLine(st), facts(h), prosCons(h));
+        body.append(ratingLine(st), facts(h));
+        const rb = residentBox(h);
+        if (rb) body.appendChild(rb);
+        body.appendChild(prosCons(h));
         if (h.details) body.appendChild(el('p', 'details', h.details));
 
         if (st.n) {
@@ -572,7 +657,9 @@ function renderReviews() {
 
     const box = $('reviewList');
     box.replaceChildren();
-    const rs = state.reviews.filter((r) => state.filter === 'all' || r.key === state.filter);
+    // Residents' check-ins first, then newest
+    const rs = state.reviews.filter((r) => state.filter === 'all' || r.key === state.filter)
+        .map((r, i) => ({ r, i })).sort((a, b) => Number(b.r.resident) - Number(a.r.resident) || a.i - b.i).map((x) => x.r);
     if (!rs.length) {
         const empty = el('div', 'no-results');
         empty.appendChild(el('p', '', state.demo
@@ -588,8 +675,15 @@ function reviewCard(r) {
     const top = el('div', 'review-top');
     const who = el('div', 'review-who');
     who.append(el('strong', '', nameOf(r.key)), el('span', 'muted', [r.name || 'Anonymous', r.iam, r.yearLived].filter(Boolean).join(' · ')));
-    top.append(stars(Number(r.overall) || 0), who);
+    if (Number(r.overall)) top.appendChild(stars(Number(r.overall)));
+    top.appendChild(who);
     card.appendChild(top);
+    if (r.resident) {
+        card.classList.add('resident');
+        const b = el('span', 'badge resident-badge');
+        b.append(icon('house'), document.createTextNode(' Resident check-in'));
+        card.appendChild(b);
+    }
     if (r.recommend) card.appendChild(badge(r.recommend === 'Yes' ? 'Recommends it' : r.recommend === 'No' ? "Doesn't recommend" : 'Maybe recommends', r.recommend === 'Yes' ? 'ok' : r.recommend === 'No' ? 'bad' : 'warn'));
 
     const subs = RATINGS.slice(1).filter(([f]) => Number(r[f]) >= 1);
@@ -639,23 +733,25 @@ function reviewCard(r) {
 // ---------- Review form ----------
 const form = { ratings: {}, iam: '', recommend: '', planWas: '' };
 
-function segButtons(id, values, field) {
-    const box = $(id);
+// Tap-to-pick buttons writing obj[field]; values are strings or [value, label] pairs
+function segButtons(id, values, field, obj = form) {
+    const box = typeof id === 'string' ? $(id) : id;
     box.replaceChildren();
-    values.forEach((v) => {
-        const b = el('button', 'seg-btn', v);
+    values.forEach((x) => {
+        const [v, label] = Array.isArray(x) ? x : [x, x];
+        const b = el('button', 'seg-btn', label);
         b.type = 'button';
-        b.setAttribute('aria-pressed', form[field] === v);
+        b.setAttribute('aria-pressed', obj[field] === v);
         b.addEventListener('click', () => {
-            form[field] = form[field] === v ? '' : v;
-            segButtons(id, values, field);
+            obj[field] = obj[field] === v ? '' : v;
+            segButtons(box, values, field, obj);
         });
         box.appendChild(b);
     });
 }
 
-function renderRatingInputs() {
-    const box = $('rvRatings');
+function renderRatingInputs(boxEl, ratings = form.ratings) {
+    const box = boxEl || $('rvRatings');
     box.replaceChildren();
     RATINGS.forEach(([f, label]) => {
         const row = el('div', `rating-row${f === 'overall' ? ' main' : ''}`);
@@ -667,12 +763,12 @@ function renderRatingInputs() {
             const b = el('button', 'star-btn');
             b.type = 'button';
             b.setAttribute('aria-label', `${i} star${i === 1 ? '' : 's'}`);
-            b.setAttribute('aria-pressed', form.ratings[f] === i);
-            b.appendChild(icon('star', (form.ratings[f] || 0) >= i ? 'on' : ''));
+            b.setAttribute('aria-pressed', ratings[f] === i);
+            b.appendChild(icon('star', (ratings[f] || 0) >= i ? 'on' : ''));
             b.addEventListener('click', () => {
-                form.ratings[f] = form.ratings[f] === i ? 0 : i;
+                ratings[f] = ratings[f] === i ? 0 : i;
                 if (navigator.vibrate) navigator.vibrate(8);
-                renderRatingInputs();
+                renderRatingInputs(box, ratings);
             });
             starsBox.appendChild(b);
         }
@@ -765,10 +861,11 @@ async function submitReview(e) {
 // ---------- Views ----------
 function setView(v) {
     state.view = v;
-    safeSet('kuh_view', v);
+    if (v !== 'resident') safeSet('kuh_view', v);
     document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', t.dataset.view === v));
-    ['fit', 'compare', 'reviews'].forEach((x) => show(`view-${x}`, x === v));
+    ['fit', 'compare', 'reviews', 'resident'].forEach((x) => show(`view-${x}`, x === v));
     if (v === 'reviews') renderReviews();
+    if (v === 'resident') renderResident();
     window.scrollTo({ top: 0 });
 }
 
@@ -806,6 +903,13 @@ async function load() {
 document.addEventListener('DOMContentLoaded', () => {
     const saved = safeGet('kuh_view');
     if (['fit', 'compare', 'reviews'].includes(saved)) state.view = saved;
+    // Resident link: ?resident (optionally ?resident=<option key> to pick the place)
+    const params = new URLSearchParams(location.search);
+    if (params.has('resident')) {
+        state.view = 'resident';
+        rc.key = params.get('resident') || '';
+    }
+    $('shareResident').addEventListener('click', shareResidentLink);
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
     $('budget').addEventListener('input', () => {
         state.prefs.budget = Number($('budget').value);

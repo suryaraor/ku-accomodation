@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Trirong:wght@500;600;700&amp;display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=1">
+    <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
     <div class="container">
@@ -89,6 +89,17 @@
             <div id="costList" class="cost-list"></div>
         </section>
 
+        <!-- Resident check-in (?resident): residents confirm or fix details, then a tap-to-answer review -->
+        <section id="view-resident" class="view" style="display: none;">
+            <div class="share-cta resident-intro">
+                <div>
+                    <h2><svg class="ic"><use href="#i-house"/></svg> Resident check-in</h2>
+                    <p>You live here, so you know best. Tap what's true about your place: prices, kitchen, meal plan, getting to class. Your answers count more than anything else on this site. About 2 minutes, no sign-in.</p>
+                </div>
+            </div>
+            <div id="rcBody"></div>
+        </section>
+
         <!-- Reviews from current and past residents -->
         <section id="view-reviews" class="view" style="display: none;">
             <div class="share-cta">
@@ -97,6 +108,7 @@
                     <p>Tell future Jayhawks what it's really like. Takes 2 minutes, no sign-in.</p>
                 </div>
                 <button id="openReview" class="primary-btn" type="button"><svg class="ic"><use href="#i-plus"/></svg> Share your experience</button>
+                <button id="shareResident" class="ghost-btn" type="button"><svg class="ic"><use href="#i-message-circle"/></svg> Send the resident check-in link to a friend at KU</button>
             </div>
             <div id="reviewFilter" class="chips" role="group" aria-label="Filter reviews"></div>
             <div id="reviewSummary"></div>
@@ -182,9 +194,10 @@
         <button id="rvSubmit" class="primary-btn sheet-save" type="submit">Post review</button>
     </form>
 
-    <script src="icons.js?v=1"></script>
-    <script src="seed.js?v=1"></script>
+    <script src="icons.js?v=4"></script>
+    <script src="seed.js?v=4"></script>
     <script src="common.js?v=2"></script>
-    <script src="app.js?v=1"></script>
+    <script src="app.js?v=4"></script>
+    <script src="resident.js?v=1"></script>
 </body>
 </html>
