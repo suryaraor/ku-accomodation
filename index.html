@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KU Housing Fit</title>
+    <meta name="description" content="Find the KU housing and meal plan that fit your budget and style, and read what students who live there say.">
+    <meta name="theme-color" content="#0051ba">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Trirong:wght@500;600;700&amp;display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1><svg class="ic"><use href="#i-house"/></svg> KU Housing Fit</h1>
+                <p class="tagline">Where should you live at KU?</p>
+            </div>
+            <div class="count-box">
+                <div class="count-label">Student</div>
+                <div class="count-number" id="reviewCount">–</div>
+                <div class="count-label">reviews</div>
+            </div>
+        </div>
+
+        <nav class="tabs" role="tablist">
+            <button class="tab" role="tab" data-view="fit"><svg class="ic"><use href="#i-sparkles"/></svg>Find my fit</button>
+            <button class="tab" role="tab" data-view="compare"><svg class="ic"><use href="#i-list"/></svg>Compare</button>
+            <button class="tab" role="tab" data-view="reviews"><svg class="ic"><use href="#i-message-square"/></svg>Reviews</button>
+        </nav>
+
+        <div id="demoBanner" class="demo-banner" style="display: none;">
+            <svg class="ic"><use href="#i-triangle-alert"/></svg>
+            <span>Sample data. Connect the Google Sheet to save reviews (see the bottom of the Reviews tab).</span>
+        </div>
+        <div id="loadingIndicator" class="loading"><p>Loading...</p></div>
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        <div id="toast" class="toast" role="status" style="display: none;"></div>
+
+        <!-- Find my fit: questions on top, ranked matches update live below -->
+        <section id="view-fit" class="view" style="display: none;">
+            <div class="section-head">
+                <h2>Tell us what you want</h2>
+                <p>Tap your answers. Your matches below update as you go.</p>
+            </div>
+            <div id="questions" class="questions"></div>
+
+            <div class="q budget-q">
+                <div class="q-title"><svg class="ic"><use href="#i-wallet"/></svg>Budget for housing + food, per year</div>
+                <div class="budget-row">
+                    <input type="range" id="budget" min="5000" max="16000" step="250" aria-label="Budget per year">
+                    <output id="budgetOut" for="budget"></output>
+                </div>
+                <label class="schol">
+                    <span>Scholarships per year <small>(optional, for the all-in estimate)</small></span>
+                    <span class="money-input"><span>$</span><input type="number" id="scholarships" min="0" step="500" inputmode="numeric" placeholder="0"></span>
+                </label>
+            </div>
+            <div class="mat-actions">
+                <button id="seeMatches" class="primary-btn" type="button">See my matches</button>
+            </div>
+
+            <div class="section-head" id="matchesHead">
+                <h2><svg class="ic"><use href="#i-target"/></svg> Your best matches</h2>
+                <p id="matchesHint"></p>
+            </div>
+            <div id="matches" class="cards"></div>
+            <div id="notEligible" class="not-eligible" style="display: none;"></div>
+        </section>
+
+        <!-- Compare: every option and meal plan side by side -->
+        <section id="view-compare" class="view" style="display: none;">
+            <div class="section-head">
+                <h2>Housing options</h2>
+                <p>Prices are per year. A KU meal plan is required with a residence hall contract and is not included.</p>
+            </div>
+            <div id="compareList" class="cards"></div>
+            <div class="section-head">
+                <h2><svg class="ic"><use href="#i-utensils"/></svg> Meal plans</h2>
+                <p>Prices are per semester (two semesters a year).</p>
+            </div>
+            <div id="diningList" class="plan-grid"></div>
+            <div class="section-head">
+                <h2><svg class="ic"><use href="#i-calculator"/></svg> Other yearly costs</h2>
+                <p>Used for the all-in estimate on your matches.</p>
+            </div>
+            <div id="costList" class="cost-list"></div>
+        </section>
+
+        <!-- Reviews from current and past residents -->
+        <section id="view-reviews" class="view" style="display: none;">
+            <div class="share-cta">
+                <div>
+                    <h2>Live at KU?</h2>
+                    <p>Tell future Jayhawks what it's really like. Takes 2 minutes, no sign-in.</p>
+                </div>
+                <button id="openReview" class="primary-btn" type="button"><svg class="ic"><use href="#i-plus"/></svg> Share your experience</button>
+            </div>
+            <div id="reviewFilter" class="chips" role="group" aria-label="Filter reviews"></div>
+            <div id="reviewSummary"></div>
+            <div id="reviewList" class="cards"></div>
+
+            <section id="setupInstructions" class="setup-instructions">
+                <h2>Connect to Google Sheet</h2>
+                <p>Paste the Apps Script web app URL (see README.md). It is saved in this browser only.</p>
+                <input type="text" id="urlInput" class="search-input" placeholder="https://script.google.com/macros/s/.../exec">
+                <button id="saveUrlBtn" class="primary-btn" type="button">Save &amp; load</button>
+            </section>
+        </section>
+
+        <p class="footer-note">Made by KU students for KU students. Prices come from <a href="https://housing.ku.edu/2026-2027-rates" target="_blank" rel="noopener">KU Housing 2026-27 rates</a>; always check with KU before you sign.</p>
+    </div>
+
+    <!-- Review form: slides up from the bottom -->
+    <div id="sheetBackdrop" class="sheet-backdrop" style="display: none;"></div>
+    <form id="reviewSheet" class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" style="display: none;" novalidate>
+        <div class="sheet-grip"></div>
+        <div class="sheet-head">
+            <span class="sheet-icon"><svg class="ic"><use href="#i-message-square"/></svg></span>
+            <div class="sheet-titles">
+                <h3 id="sheetTitle">Share your experience</h3>
+                <p>Be honest and kind. Don't name other students.</p>
+            </div>
+            <button id="sheetClose" class="sheet-close" type="button" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+
+        <label class="field">
+            <span class="field-label">Where do (or did) you live?</span>
+            <select id="rvKey" required></select>
+        </label>
+        <div class="field">
+            <span class="field-label">I am</span>
+            <div class="seg" id="rvIam"></div>
+        </div>
+        <div class="field two">
+            <label>
+                <span class="field-label">School year you lived there</span>
+                <select id="rvYear"></select>
+            </label>
+            <label>
+                <span class="field-label">Your first name <small>(optional)</small></span>
+                <input id="rvName" type="text" maxlength="40" autocomplete="given-name" placeholder="Anonymous">
+            </label>
+        </div>
+
+        <div class="field">
+            <span class="field-label">Ratings <small>(overall is required)</small></span>
+            <div id="rvRatings" class="rating-rows"></div>
+        </div>
+        <div class="field">
+            <span class="field-label">Would you recommend it?</span>
+            <div class="seg" id="rvRecommend"></div>
+        </div>
+        <div class="field two">
+            <label>
+                <span class="field-label">Your meal plan</span>
+                <select id="rvPlan"></select>
+            </label>
+            <div>
+                <span class="field-label">It was</span>
+                <div class="seg small" id="rvPlanWas"></div>
+            </div>
+        </div>
+
+        <label class="field">
+            <span class="field-label"><svg class="ic"><use href="#i-thumbs-up"/></svg> What's great?</span>
+            <textarea id="rvPros" rows="2" maxlength="500" placeholder="e.g. Quiet floors, close to classes"></textarea>
+        </label>
+        <label class="field">
+            <span class="field-label"><svg class="ic"><use href="#i-thumbs-down"/></svg> What's not?</span>
+            <textarea id="rvCons" rows="2" maxlength="500" placeholder="e.g. Long walk up the hill in winter"></textarea>
+        </label>
+        <label class="field">
+            <span class="field-label"><svg class="ic"><use href="#i-lightbulb"/></svg> Tips for new students</span>
+            <textarea id="rvTips" rows="2" maxlength="500" placeholder="e.g. Bring a fan, request a top floor"></textarea>
+        </label>
+        <!-- Honeypot: hidden from people, bots fill it in -->
+        <input id="rvWebsite" class="hp" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+        <button id="rvSubmit" class="primary-btn sheet-save" type="submit">Post review</button>
+    </form>
+
+    <script src="icons.js?v=1"></script>
+    <script src="seed.js?v=1"></script>
+    <script src="common.js?v=2"></script>
+    <script src="app.js?v=1"></script>
+</body>
+</html>
